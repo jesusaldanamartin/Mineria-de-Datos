@@ -1,0 +1,273 @@
+---
+title: "Introducción a la estadística descriptiva"
+author: "Jesús Aldana Martín"
+date: '2022-03-25'
+output: 
+  html_document:
+  toc: true
+---
+
+# Procesado de Información
+Comenzamos leyendo el archivo suministrado datos_p1.csv en el que encontramos variables separadas por comas. Leemos los datos mediante read.table y convertimos todas los tipo String a Factor, con summary(datos) vemos un pequeño "resumen" de las variables a estudiar.
+
+```{r}
+datos <- read.table(file="datos_proporcionados.csv", sep=";", dec=",", header=T, stringsAsFactors = TRUE)
+head(datos,20) #Primeras 20 filas.
+summary(datos) #Mediante summary obtenemos un pequeño "resumen" de las variables a estudiar. 
+
+```
+
+# Función MODA
+Función para hallar la Moda de la columna indicada:
+
+```{r}
+statistic_mode <- function(x){
+    return(names(which.max(table(x))))
+}
+
+```
+
+```{r}
+table(datos$REst)
+table(datos$RPro)
+table(datos$Her2)
+table(datos$Grado)
+grados_integer <- as.integer(na.omit(datos$Grado))
+
+
+```
+
+
+Gracias a esta vista general de los datos para poder pasar al analisis univariante primero debemos de corregir los datos perdidos. Los datos proporcionados tienen tanto NaN como en algunas variables categoricas "I" de indeterminado. Para solucionar estudiaré los datos eliminando directamente los atributos perdidos obteniendo directamente los valores de estudio y también sustituire los valores perdidos por la media o moda de la columna y mantener la misma cantidad de datos que se nos proporciona para el estudio.
+
+
+```{r}
+#Columnas con valores indeterminados, transformo los valores indeterminados en NA
+datos$REst[datos$REst == "I"] <- NA
+datos$RPro[datos$RPro == "I"] <- NA
+datos$Her2[datos$Her2 == "I"] <- NA
+
+```
+
+```{r}
+#Calculo la moda de cada columna y la sustituyo en los valores perdidos.
+modaRest <- statistic_mode(na.omit(datos$REst))
+modaRPro <- statistic_mode(na.omit(datos$RPro))
+modaHer2 <- statistic_mode(na.omit(datos$Her2))
+modaPCR <- statistic_mode(na.omit(datos$PCR))
+
+datos$REst[is.na(datos$REst)] <- modaRest
+datos$RPro[is.na(datos$RPro)] <- modaRPro
+datos$Her2[is.na(datos$Her2)] <- modaHer2
+datos$PCR[is.na(datos$PCR)] <- modaPCR
+
+#La columna Grado aunque sea numérica sustituyo los valores perdidos por la moda también ya que esta solo se expresa como 1, 2 o 3 y la media daría un valor double.
+
+modaGrado <- statistic_mode(na.omit(datos$Grado))
+datos$Grado[is.na(datos$Grado)] <- modaGrado
+
+```
+
+```{r}
+
+#Tablas con los valores sustituidos
+table(datos$REst) 
+table(datos$RPro)
+table(datos$Her2)
+table(datos$Grado)
+grados_sustituidos <- as.integer(datos$Grado)
+
+```
+
+#Análisis Univariante.
+
+Análisis univariante respecto a la PCR, en este apartado el objetivo es definir, resumir y analizar el ptrón presente en ellos. Explorando cada variable por separado. Los más faciles de indentificar son la Tendencia central (media,moda,mediana), Dispersión(rango, varianza) y Desviación Estándar. Para ello representaremos las variables en gráficos de barras, histogramas etc..
+
+```{r}
+mean(grados_integer) #Media eliminando los valores NaN.
+mean(grados_sustituidos)#Media sustituyendo los valores perdidos por la moda.
+
+edad <- datos$Edad
+var(edad)
+sd(edad)
+median(edad)
+
+hist(datos$Edad) #Histograma Edades
+
+barplot(table(datos$Grado))
+barplot(table(datos$Fenotipo))
+barplot(table(datos$NodAfec))
+
+
+```
+
+#Análisis Bivariante respecto de la PCR, mediante test estádisticos.
+
+```{r}
+
+#Solo representando la PCR respecto al GRADO ya podemos observar como a mayor sea el grado del tumor mayor posibilidad de Metástasis(poco menos de la mitad de los pacientes)
+barplot(table(datos$PCR, datos$Grado), beside = TRUE, legend.text = TRUE, ylab = "Frecuencia", xlab = "Grado")
+
+
+#Para poder comparar tambien la edad con el resto de variables inserto la edad en un vector y lo separo por intervalos
+datos$Edad_categorica <-  cut(datos$Edad, breaks=c(0,40,60,max(datos$Edad)))
+datos$Edad_categorica[1:10] #Expreso los 10 primeros intervalos para comprobar que se ha modificado correctamente.
+
+#Al comparar las variables Grado y PCR respecto a la edad (las que mas influyen en la mortalidad del paciente) obtenemos los siguientes grafos , sin embargo, esta información es poco útil ya que la media de edades de nuestro archivo es de 49.80492 por tanto hay mayor frecuencia de metástasis y de cada grado de tumor para el intervalo de edades[40,60] Lo único que podemos sacar en claro es que esa franja de edad es la más común a la hora de desarrollar un tumor.
+
+barplot(table(datos$PCR,datos$Edad_categorica), beside = TRUE, legend.text = TRUE, ylab = "Frecuencia", xlab = "Edad, PCR")
+barplot(table(datos$Grado, datos$Edad_categorica), beside = TRUE, legend.text = TRUE, ylab = "Frecuencia", xlab = "Grado")
+
+# Barplot NodosAfectados respecto a PCR
+barplot(table(datos$NodAfec, datos$PCR), beside = TRUE, legend.text = TRUE, ylab = "Frecuencia", xlab = "NodosAfectados, PCR")
+
+# Observamos que de expresar el fenotipo Basal lo probabilidad de metástasis aumenta considerablemente.
+barplot(table(datos$Fenotipo, datos$PCR), beside = TRUE, legend.text = TRUE, ylab = "Frecuencia", xlab = "Fenotipo")
+
+
+```
+
+La siguiente función nada mas se accede a esta comprueba si la la variable de estudio es numérica, que , de ser así se devolverá un t.test, en nuestro caso la única variable numérica es la edad. Lo siguiente sería crear la tabla de contingencia para la columna de estudio y devolver el método fisher o chi-cuadrado en función de si la tabla es de dimensiones 2x2.
+
+
+```{r}
+
+test_estadistico <- function(columna){
+  if(is.numeric(columna)){
+    ret <- t.test(PCR ~ columna, data = datos)
+  }else{
+   tablaContingencia <- xtabs(~ PCR + columna, data = datos)
+    if(ncol(tablaContingencia) <= 3 & nrow(tablaContingencia) == 2){
+      ret<- fisher.test(tablaContingencia)
+    }else{
+      ret <- chisq.test(tablaContingencia)
+    }
+
+  }
+  return(ret)
+}
+  
+```
+
+```{r}
+test_estadistico(datos$Edad_categorica)
+test_estadistico(datos$REst)
+test_estadistico(datos$RPro)
+test_estadistico(datos$Her2)
+test_estadistico(datos$Estadio)
+test_estadistico(datos$NodAfec)
+test_estadistico(datos$Grado)
+```
+
+#Análisis Multivariante
+
+Implementamos la libreria MASS y obtenemos la regresión logística. Para ello primero debemos de eliminar la columna de Muestra de nuestro data set. Mediante summary observamos como Rstudio nos marca aquellos atributos aprueban la hipótesis nula (cuyo p-valor es menor a 0.05) estos son FenotipoLumA y la edad_categórica entre 40,60.
+
+```{r}
+library(MASS)
+
+datos_sinMuestra <- datos[,-1]
+regresionLogistica <- glm(PCR == 1 ~ ., data = datos_sinMuestra, family = binomial("logit"))
+summary(regresionLogistica)
+```
+
+Ahora mediante el método stepwise backwards obtenemos como resultado 6 iteraciones, y procedo a realizar 4 predicciones de R para los siguientes valores. En cada una comprobe un fenotipo diferente pues era el atributo que la regresión logistica me marcaba observamos como el fenotipo con mayor probabilidad de aparecer para los PCR = 1 es el BASAL.
+
+```{r}
+regresionLogistica_backwards <- stepAIC(regresionLogistica, direction = "backward")
+summary(regresionLogistica_backwards)
+
+predict(regresionLogistica_backwards, newdata = data.frame(PCR = 1, RPro = "N", Her2 = "P", REst = "P", Estadio = "T1", Grado = "2",NodAfec = "N2" ,Fenotipo = "Normal", Edad_categorica ="(40,60]"), type = "response")
+
+predict(regresionLogistica_backwards, newdata = data.frame(PCR = 1, RPro = "N", Her2 = "P", REst = "P", Estadio = "T1", Grado = "2",NodAfec = "N2" ,Fenotipo = "LumA", Edad_categorica ="(40,60]"), type = "response")
+
+predict(regresionLogistica_backwards, newdata = data.frame(PCR = 1, RPro = "N", Her2 = "P", REst = "P", Estadio = "T1", Grado = "2",NodAfec = "N2" ,Fenotipo = "LumB", Edad_categorica ="(40,60]"), type = "response")
+
+predict(regresionLogistica_backwards, newdata = data.frame(PCR = 1, RPro = "N", Her2 = "P", REst = "P", Estadio = "T1", Grado = "2",NodAfec = "N2" ,Fenotipo = "Basal", Edad_categorica ="(40,60]"), type = "response")
+
+
+```
+
+
+```{r}
+
+mod.lin <- glm(PCR == "1"~ Edad_categorica + Fenotipo, data = datos)
+summary(mod.lin)
+plot(datos$PCR == 1, datos$FenotipoLumA)
+
+```
+
+```{r}
+lr.pred <- predict(regresionLogistica, newdata = datos, type="response")
+lr.pred
+
+tPos <- lr.pred[which(lr.pred >= 0.5)]
+tNeg <- lr.pred[which(lr.pred <= 0.5)]
+AccuracyTpos <- length(tPos)/length(lr.pred)
+AccuracyTpos #APPARENT ACCURACY
+AccuracyTneg <- length(tNeg)/length(lr.pred)
+AccuracyTneg #APPARENT NEGATIVE ACCURACY
+
+length(tPos)
+length(lr.pred)
+length(tNeg)
+
+```
+- Modelo completo
+- Stepwise
+Realizar Holdout
+
+```{r}
+#----------------------------------------#
+
+ind.test <- sample(nrow(datos), 442)
+length(datos$PCR)
+ind.test
+datos.train <- datos[-ind.test,]
+datos.train
+
+datos.test <- datos[ind.test,]
+datos.test
+
+length(datos.train)
+length(ind.test)
+length(datos.test)
+
+Accuracy <- length(datos.train)/length(datos.test)
+Accuracy
+
+#1- import datos
+#2- division trainTest
+#3- calculo ACCtrain
+#4- calculo salida test
+#5- calculo ACCtest
+
+#REPLICATE(n,f) devuelve una lista de los valores que da la funcion n veces. (sustituye al for).
+
+# REPEATED HOLD-OUT y ANALISIS uROC
+library(caret)
+
+sample(1:10,5)
+
+index <- createDataPartition(datos$PCR, p = 0.8, list = FALSE)
+
+head(index)
+dim(index)
+
+traindata <- datos[index,]
+testdata <- datos[-index,]
+dim(traindata)
+dim(testdata)
+summary(mod.lin)
+#CREATE K FOLDS
+train.control <- trainControl(method = "lm",  number = 10, repeats = 3)
+train.model <- train(datos$PCR ~., data = datos, method = "lm", trControl = train.control)
+
+createFolds(traindata, k = 5, list = TRUE, returnTrain = FALSE)
+#Undebug
+
+
+```
+
+
+

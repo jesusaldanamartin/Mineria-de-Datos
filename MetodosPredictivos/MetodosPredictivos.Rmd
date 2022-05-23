@@ -1,0 +1,188 @@
+---
+title: "Métodos Predictivos"
+output: html_notebook
+---
+
+#Librerias necesarias para la implementación de la actividad :
+
+```{r}
+suppressWarnings(library(MASS))
+suppressWarnings(library(caret))
+suppressWarnings(library(pROC))
+suppressWarnings(library(ggplot2))
+suppressWarnings(library(lattice))
+```
+
+Al igual que para la actividad anterior, debemos de encargarnos de procesar los datos y eliminar aquellos que se hayan perdido, que Rstudio marca como Na.
+
+```{r}
+datos <- read.table(file="datos_proporcionados.csv", sep=";", dec=",", header=T, stringsAsFactors = TRUE)
+
+datos$REst[datos$REst == "I"] <- NA
+datos$RPro[datos$RPro == "I"] <- NA
+datos$Her2[datos$Her2 == "I"] <- NA
+
+datos<- na.omit(datos) 
+summary(datos)
+
+```
+
+Recopilamos de la actividad anterior los datos sin la columna muestra y la regresion logística. Mediante la función predict le pediremos a RStudio que nos haga una predicción en base ha nuestro modelo dando como respuesta un número entre 0 y 1 que nos indicará la probabilidad de que se haya producido metástasis (PCR = 1). Para el cálculo del accuracy aparente debemos de estimar bajo nuestro punto de vista cual será el umbral de metástasis. Para esta actividad he escogido 0.5 (normalmente el valor por defecto) como umbral , siendo cualquier valor superior a este el indicativo de PCR positiva y de ser menor PCR negativa.
+
+Tras la predicción guardamos los valores true positivos (aquellos \> 0.5) en el atributo trueValores y calculamos la división de aquellos valores de la lista que sean TRUE entre los FALSE.
+
+```{r}
+data <- datos[,-1]
+regresionLogistica <- glm(PCR == 1 ~ ., data = data, family = binomial("logit"))
+summary(regresionLogistica)
+
+
+lr.pred <- predict(regresionLogistica, newdata = data, type="response")
+summary(lr.pred)
+trueValores <- lr.pred > 0.5
+
+summary(trueValores)
+acc <- length(which(trueValores == TRUE))/length(trueValores)  #[TRUE]/[False] = 6/436
+acc
+
+```
+
+Por último hallamos la matriz de confusión que es una herramienta que nos permite ver el desempeño de un algoritmo en aprendizaje supervisado, cada columna de la matriz representa el número de predicciones de cada clase, mientras que cada fila a las instancias en la clase real. Sumando las celdas [1,1] y [2,2] obtenemos aquellos pacientes en los que no se ha producido metástasis y los dividimos entre el conjunto total. Obteniendo un accuracy de 0.8076923.
+
+```{r}
+matrizConfusion <- table(data$PCR, trueValores)
+matrizConfusion
+```
+
+Comparamos los trueValores de la predicción con los del conjunto original.
+```{r}
+valoresAccuracy <- trueValores==datos$PCR
+summary(valoresAccuracy)
+
+accuracy <- (353+4)/(353+2+83+4)
+accuracy
+
+#Calculamos AUC
+
+area <- auc(data$PCR, lr.pred)
+area
+```
+
+#HoldOut Method
+
+El método Holdout es uno de los más básicos entre los tipos de cross-validation de modelos predictivos, aquí el dataset original se divide en dos partes uno de entrenamientos(training) y otro de evaluación(testing). En la mayoría de los casos es cojunto de datos de entrenamiento es dos veces mayor al de test, utilizando tras dividir los datos un ratio de 80:20 o 70:30.
+
+```{r}
+#LO QUE TENIA DE CLASES
+valores <- sample(0:1, length(na.omit(data$PCR)), replace = TRUE)
+datos.train <- valores[0:405]
+datos.test <- valores[406:508]
+
+datos.train
+datos.test
+
+length(datos.train)
+length(datos.test)
+length(valores)
+
+datos.training <- datos[datos.train] 
+datos.training
+#rl.Training <- glm(PCR == 1 ~ ., data = datos.train, family = binomial("logit"))
+#rl.Training <- stepAIC(datos.train, direction = "backward")
+
+Accuracy <- length(datos.train)/length(datos.test)
+Accuracy
+```
+HOLDOUT METHOD
+
+```{r}
+#BIBLIOTECA
+data <- as.data.frame(data)
+
+
+index <- createDataPartition(data$PCR, p=.8, list=FALSE, times=1)
+train_Holdout <- data[index,]
+test_Holdout <- data[-index,]
+
+train_Holdout$PCR[train_Holdout$PCR==1] <- "Yes"
+train_Holdout$PCR[train_Holdout$PCR==0] <- "No"
+
+test_Holdout$PCR[test_Holdout$PCR==1] <- "Yes"
+test_Holdout$PCR[test_Holdout$PCR==0] <- "No"
+
+train_Holdout$PCR <- as.factor(train_Holdout$PCR)
+test_Holdout$PCR <- as.factor(test_Holdout$PCR)
+
+#Entrenamos el set de train.
+rl_holdout <- glm(PCR == "Yes" ~ ., data = train_Holdout, family = binomial("logit"))
+rl_holdout_StepAIC <- stepAIC(rl_holdout, direction = "backward")
+
+#Con el modelo realizado y entrenado lo aplicamos al conjunto de test.
+
+test_holdout_Modelo <- predict(rl_holdout_StepAIC, data = test_Holdout)
+summary(test_holdout_Modelo)
+
+#confusionMatrix(data = test_holdout_Modelo, test_Holdout$PCR)
+
+
+```
+
+
+
+k-fold Cross Validation Method.
+
+El método k-fold cross-validation es una versión mejorada del holdout, este proporciona más consistencia a los resultados del modelo ya que no depende de como escogemos los datos de training y testing. En este caso el dataset se divide en k porciones y el método holdout se realiza k veces. Comienza el k-fold cross-validation separando de manera aleatoria los datos en k subconjuntos para los cuales en cada iteración, el modelo se entrenará en base al subconjunto k-1 para testearlos respecto al set de datos de test para ir comprobando su rendimiento. El proceso se repite hasta que todos los k-folds se han evaluados, de esta manera, el cross-validation accuracy sera la media final de cada resultado por iteración. Este accuracy es muy útil para comparar el rendimiento de diferentes modelos predictivos.
+
+
+##Función k-fold:
+```{r}
+crossVal <- function(data, k = 10) {
+
+  df <- as.data.frame(data)
+
+  index <- createDataPartition(df$PCR, p=.8, list=FALSE, times=1)
+  #Separamos los datos en entrenamiento y test.
+  train_df <- df[index,]
+  test_df <- df[-index,]
+  
+  #Renombramos valores de salida.
+  train_df$PCR[train_df$PCR==1] <- "Yes"
+  train_df$PCR[train_df$PCR==0] <- "No"
+  
+  test_df$PCR[test_df$PCR==1] <- "Yes"
+  test_df$PCR[test_df$PCR==0] <- "No"
+  
+  #Pasamos las salidas a factor
+  train_df$PCR <- as.factor(train_df$PCR)
+  test_df$PCR <- as.factor(test_df$PCR)
+  
+  #Metodo de entrenamiento
+  cross_validation <- trainControl(method = "cv", repeats = k, savePredictions = "all", classProbs = TRUE)
+  
+  #Regresion Logistica a la que le aplicamos el metodo
+  set.seed(2001)
+  modelo <- train(PCR ~. , data = train_df, method = "glm",  family = binomial, trControl = cross_validation)
+
+  #Aplicamos el modelo anterior a los datos separados anteriormente para test. Predictions
+  predictions <- predict(modelo, newdata = test_df)
+
+  #Creamos la matriz de confusion
+  confusionMatrix(data = predictions, test_df$PCR)
+  #Calculamos el area AUC
+  auc(test_df$PCR, as.numeric(predictions))
+}
+
+```
+
+Ahora llamamos a la función, está devuelve la matriz de confusión ya con el entrenamiento aplicado al conjunto de test. 
+```{r}
+suppressWarnings(crossVal(data))
+```
+
+Esta técnica por lo general produce menos modelos "defectuosos" ya que todos los datos parten del dataset original siendo el método indicado de tener una cantidad de datos reducida ya que durante la ejecución del método necesitamos de k-1 más iteraciones que el holdout, necesitando mucho más tiempo para procesar los datos.
+
+Área bajo la curva.
+
+```{r}
+
+```
